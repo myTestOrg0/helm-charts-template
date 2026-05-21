@@ -89,26 +89,6 @@ jobs:
           asset_name: k8s-helm-charts-template-${{ env.CHART_VERSION }}.tgz
           asset_content_type: application/gzip
 
-      - name: Upload alerts chart package
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./dist/alerts-${{ env.CHART_VERSION }}.tgz
-          asset_name: alerts-${{ env.CHART_VERSION }}.tgz
-          asset_content_type: application/gzip
-
-      - name: Upload dashboards chart package
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./dist/grafana-dashboards-${{ env.CHART_VERSION }}.tgz
-          asset_name: grafana-dashboards-${{ env.CHART_VERSION }}.tgz
-          asset_content_type: application/gzip
-
       - name: Login to GHCR
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | \
