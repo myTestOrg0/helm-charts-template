@@ -1,0 +1,19 @@
+{{- if .Values.PodDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Values.name }}-pdb
+  namespace: {{ .Release.Namespace }}
+spec:
+  {{- if .Values.PodDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ .Values.PodDisruptionBudget.maxUnavailable }}
+  {{- end }}
+  {{- if .Values.PodDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.PodDisruptionBudget.minAvailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Values.name }}
+      resource: deployment
+{{- end }}

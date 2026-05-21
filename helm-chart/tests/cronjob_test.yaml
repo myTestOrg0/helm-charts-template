@@ -1,0 +1,100 @@
+suite: Test Cronjob template with CI Values
+templates:
+  - templates/cronjob.yaml
+values:
+  - ../ci-values.yaml
+release:
+  namespace: test-namespace
+tests:
+  - it: should render cronjob with values from ci-values.yaml
+    asserts:
+      - isKind:
+          of: CronJob
+
+      # ─────────────── metadata ───────────────
+      - equal:
+          path: metadata.name
+          value: test-cronjob
+      - equal:
+          path: metadata.namespace
+          value: test-namespace
+
+      # ─────────────── cronjob specs ───────────────
+      - equal:
+          path: spec.schedule
+          value: "*/5 * * * *"
+
+      # ─────────────── template labels ───────────────
+      - isNotEmpty:
+          path: spec.jobTemplate.spec.template.metadata.labels
+
+      # ─────────────── container.image ───────────────
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].image
+          value: "docker.io/test-image:v1.3.0"
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].name
+          value: container-1
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.automountServiceAccountToken
+          value: false
+
+      # ─────────────── command ───────────────
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].command[0]
+          value: /bin/sh
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].command[1]
+          value: -c
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].args[0]
+          value: date; echo "Hello from container one"
+
+      # ─────────────── resources ───────────────
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].resources.limits.cpu
+          value: "50m"
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].resources.limits.memory
+          value: "32Mi"
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].resources.requests.cpu
+          value: "10m"
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].resources.requests.memory
+          value: "16Mi"
+
+  - it: should render OpenBao token projection when OpenBao injection is enabled
+    set:
+      openbao:
+        enabled: true
+        annotations:
+          vault.hashicorp.com/agent-inject: "true"
+          vault.hashicorp.com/role: test-role
+          vault.hashicorp.com/agent-inject-secret-app: secret/data/test
+        serviceAccountToken:
+          volumeName: openbao-custom-token
+          expirationSeconds: 7200
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.automountServiceAccountToken
+          value: false
+      - equal:
+          path: spec.jobTemplate.spec.template.metadata.annotations["vault.hashicorp.com/agent-inject"]
+          value: "true"
+      - equal:
+          path: spec.jobTemplate.spec.template.metadata.annotations["vault.hashicorp.com/agent-service-account-token-volume-name"]
+          value: openbao-custom-token
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.volumes
+          content:
+            name: openbao-custom-token
+            projected:
+              sources:
+                - serviceAccountToken:
+                    path: token
+                    expirationSeconds: 7200
+      - notContains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].volumeMounts
+          content:
+            name: openbao-custom-token

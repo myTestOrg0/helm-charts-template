@@ -1,0 +1,105 @@
+name: Lint and test Helm Charts
+
+on:
+  push:
+    paths:
+      - 'helm-chart/**'
+      - 'alerts/**'
+      - 'grafana-dashboards/**'
+      - '.github/workflows/*.yml'
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install helm and unittest plugin
+        run: |
+          HELM_VERSION="3.18.6-1"
+          HELM_UNITTEST_PLUGIN_VERSION="0.8.2"
+          HELM_UNITTEST_PLUGIN_SHA256="b94e638e72cf00034654b70944c0d20cb5d0c3cf"
+          curl -fsSL https://packages.buildkite.com/helm-linux/helm-debian/gpgkey | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/helm.gpg] https://packages.buildkite.com/helm-linux/helm-debian/any/ any main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+          sudo apt update && sudo apt install -y helm=${HELM_VERSION}
+          git clone https://github.com/helm-unittest/helm-unittest
+          cd helm-unittest
+          git checkout ${HELM_UNITTEST_PLUGIN_SHA256}
+          helm plugin install .
+          rm -rf helm-unittest
+
+      - name: Set up chart-testing
+        uses: helm/chart-testing-action@0d28d3144d3a25ea2cc349d6e59901c4ff469b3b # v2.7.0
+
+      - name: Run helm lint
+        run: |
+          helm lint helm-chart/
+          helm lint alerts/
+          helm lint grafana-dashboards/
+
+      - name: Run chart-testing (list-changed)
+        id: list-changed
+        run: |
+          changed=$(ct list-changed --chart-dirs . --target-branch ${{ github.event.repository.default_branch }})
+          if [[ -n "$changed" ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run chart-testing (lint)
+        if: steps.list-changed.outputs.changed == 'true'
+        run: ct lint --chart-dirs . --target-branch ${{ github.event.repository.default_branch }}
+
+      - name: Run unit tests
+        run: |
+          set -euo pipefail
+
+          alerts_version=$(grep '^version:' alerts/Chart.yaml | awk '{print $2}')
+          dashboards_version=$(grep '^version:' grafana-dashboards/Chart.yaml | awk '{print $2}')
+          tmp_root=$(mktemp -d)
+
+          mkdir -p "${tmp_root}/alerts/templates" "${tmp_root}/alerts/tests" "${tmp_root}/alerts/files"
+          cat > "${tmp_root}/alerts/Chart.yaml" <<EOF
+          apiVersion: v2
+          name: alerts-consumer-test
+          version: 0.1.0
+          type: application
+          dependencies:
+            - name: alerts
+              version: ${alerts_version}
+              repository: "file://$(pwd)/alerts"
+          EOF
+          cp alerts/ci-values.yaml "${tmp_root}/alerts/ci-values.yaml"
+          cp alerts/tests/prometheusrule_test.yaml "${tmp_root}/alerts/tests/prometheusrule_test.yaml"
+          cp alerts/files/example-alert.yaml "${tmp_root}/alerts/files/example-alert.yaml"
+          cat > "${tmp_root}/alerts/templates/prometheusrule.yaml" <<'EOF'
+          {{ include "lido.alerts.render" . }}
+          EOF
+
+          mkdir -p "${tmp_root}/grafana-dashboards/templates" "${tmp_root}/grafana-dashboards/tests" "${tmp_root}/grafana-dashboards/dashboards"
+          cat > "${tmp_root}/grafana-dashboards/Chart.yaml" <<EOF
+          apiVersion: v2
+          name: grafana-dashboards-consumer-test
+          version: 0.1.0
+          type: application
+          dependencies:
+            - name: grafana-dashboards
+              version: ${dashboards_version}
+              repository: "file://$(pwd)/grafana-dashboards"
+          EOF
+          cp grafana-dashboards/ci-values.yaml "${tmp_root}/grafana-dashboards/ci-values.yaml"
+          cp grafana-dashboards/tests/configmap_test.yaml "${tmp_root}/grafana-dashboards/tests/configmap_test.yaml"
+          cp grafana-dashboards/dashboards/example-dashboard.json "${tmp_root}/grafana-dashboards/dashboards/example-dashboard.json"
+          cat > "${tmp_root}/grafana-dashboards/templates/configmap.yaml" <<'EOF'
+          {{ include "lido.grafanaDashboards.render" . }}
+          EOF
+
+          helm dependency build "${tmp_root}/alerts"
+          helm dependency build "${tmp_root}/grafana-dashboards"
+
+          helm unittest helm-chart
+          helm unittest "${tmp_root}/alerts"
+          helm unittest "${tmp_root}/grafana-dashboards"
